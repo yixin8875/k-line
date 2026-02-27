@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --board-rgb: 255 255 255;
+  --panel-rgb: 255 255 255;
+  --text-rgb: 24 49 92;
+  --muted-rgb: 90 116 157;
+  --accent-rgb: 42 111 238;
+  --danger-rgb: 220 38 38;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --board-rgb: 9 15 31;
+  --panel-rgb: 19 30 54;
+  --text-rgb: 225 235 252;
+  --muted-rgb: 139 160 197;
+  --accent-rgb: 59 130 246;
+  --danger-rgb: 239 68 68;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family:
+    'PingFang SC',
+    'SF Pro Text',
+    'Hiragino Sans GB',
+    'Microsoft YaHei',
+    'Segoe UI',
+    sans-serif;
+  background: rgb(var(--board-rgb));
+  color: rgb(var(--text-rgb));
+  -webkit-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgb(var(--accent-rgb) / 0.3);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--accent-rgb) / 0.4) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgb(var(--accent-rgb) / 0.4);
+  border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
