@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	goRuntime "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +20,13 @@ import (
 	"github.com/getlantern/systray"
 	wailsMac "github.com/wailsapp/wails/v2/pkg/mac"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+var (
+	// Version is injected by build flags in release workflow, e.g. -X main.Version=v1.2.3.
+	Version = "dev"
+	// Repo is injected by build flags in release workflow, e.g. -X main.Repo=owner/repo.
+	Repo = ""
 )
 
 // App contains backend runtime state.
@@ -41,6 +50,24 @@ type App struct {
 type windowState struct {
 	Width  int `json:"width"`
 	Height int `json:"height"`
+}
+
+type githubReleasePayload struct {
+	TagName     string `json:"tag_name"`
+	Name        string `json:"name"`
+	HTMLURL     string `json:"html_url"`
+	Body        string `json:"body"`
+	PublishedAt string `json:"published_at"`
+}
+
+type UpdateInfo struct {
+	CurrentVersion string `json:"currentVersion"`
+	LatestVersion  string `json:"latestVersion"`
+	HasUpdate      bool   `json:"hasUpdate"`
+	ReleaseName    string `json:"releaseName"`
+	ReleaseURL     string `json:"releaseURL"`
+	PublishedAt    string `json:"publishedAt"`
+	Notes          string `json:"notes"`
 }
 
 // NewApp creates a new App application struct.
@@ -460,4 +487,139 @@ func (a *App) PushExternalNotification(provider string, endpoint string, token s
 	}
 
 	return fmt.Errorf("push failed: status=%s body=%s", resp.Status, strings.TrimSpace(string(responseBody)))
+}
+
+func normalizeVersion(input string) string {
+	trimmed := strings.TrimSpace(input)
+	trimmed = strings.TrimPrefix(trimmed, "v")
+	trimmed = strings.Split(trimmed, "-")[0]
+	trimmed = strings.Split(trimmed, "+")[0]
+	return trimmed
+}
+
+func parseSemver(input string) (int, int, int, bool) {
+	normalized := normalizeVersion(input)
+	parts := strings.Split(normalized, ".")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0, 0, 0, false
+	}
+
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, 0, false
+	}
+
+	patch := 0
+	if len(parts) == 3 {
+		patch, err = strconv.Atoi(parts[2])
+		if err != nil {
+			return 0, 0, 0, false
+		}
+	}
+
+	return major, minor, patch, true
+}
+
+func isVersionNewer(latest string, current string) bool {
+	la, lb, lc, lok := parseSemver(latest)
+	ca, cb, cc, cok := parseSemver(current)
+	if !lok || !cok {
+		return false
+	}
+	if la != ca {
+		return la > ca
+	}
+	if lb != cb {
+		return lb > cb
+	}
+	return lc > cc
+}
+
+func shortNotes(input string, limit int) string {
+	trimmed := strings.TrimSpace(input)
+	if limit <= 0 || len(trimmed) <= limit {
+		return trimmed
+	}
+	return strings.TrimSpace(trimmed[:limit]) + "..."
+}
+
+// CheckForUpdates checks latest GitHub release and returns update metadata.
+func (a *App) CheckForUpdates() (UpdateInfo, error) {
+	repo := strings.TrimSpace(Repo)
+	if repo == "" {
+		repo = strings.TrimSpace(os.Getenv("KLINE_GITHUB_REPO"))
+	}
+	if repo == "" {
+		return UpdateInfo{}, errors.New("repo is empty, set via -X main.Repo=owner/repo")
+	}
+
+	apiURL := "https://api.github.com/repos/" + repo + "/releases/latest"
+	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+	if err != nil {
+		return UpdateInfo{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "kline-desktop-updater")
+
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return UpdateInfo{}, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return UpdateInfo{}, fmt.Errorf("github api failed: status=%s body=%s", resp.Status, strings.TrimSpace(string(body)))
+	}
+
+	var release githubReleasePayload
+	if err = json.Unmarshal(body, &release); err != nil {
+		return UpdateInfo{}, err
+	}
+
+	currentVersion := strings.TrimSpace(Version)
+	if currentVersion == "" {
+		currentVersion = "dev"
+	}
+	latestVersion := strings.TrimSpace(release.TagName)
+	if latestVersion == "" {
+		latestVersion = strings.TrimSpace(release.Name)
+	}
+	return UpdateInfo{
+		CurrentVersion: currentVersion,
+		LatestVersion:  latestVersion,
+		HasUpdate:      isVersionNewer(latestVersion, currentVersion),
+		ReleaseName:    release.Name,
+		ReleaseURL:     release.HTMLURL,
+		PublishedAt:    release.PublishedAt,
+		Notes:          shortNotes(release.Body, 1800),
+	}, nil
+}
+
+// OpenURL opens a URL in system browser.
+func (a *App) OpenURL(target string) error {
+	if strings.TrimSpace(target) == "" {
+		return errors.New("url is required")
+	}
+	parsed, err := url.Parse(strings.TrimSpace(target))
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return errors.New("unsupported url scheme")
+	}
+
+	a.mu.Lock()
+	ctx := a.ctx
+	a.mu.Unlock()
+	if ctx == nil {
+		return errors.New("runtime context unavailable")
+	}
+	wailsRuntime.BrowserOpenURL(ctx, parsed.String())
+	return nil
 }

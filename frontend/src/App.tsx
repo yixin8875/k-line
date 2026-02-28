@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { EventsOff, EventsOn } from '../wailsjs/runtime/runtime';
 import {
+  CheckForUpdates,
   NotifySystem,
+  OpenURL,
   PushExternalNotification,
   RequestQuit,
   SetAlwaysOnTop,
@@ -72,6 +74,16 @@ type TaskDraft = {
   useCustom: boolean;
   leadSeconds: string;
   sessionTemplate: SessionTemplateId;
+};
+
+type UpdateInfo = {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  releaseName: string;
+  releaseURL: string;
+  publishedAt: string;
+  notes: string;
 };
 
 const VALID_SESSION_IDS = new Set<SessionTemplateId>(SESSION_TEMPLATES.map((item) => item.id));
@@ -219,6 +231,8 @@ function App() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string>('');
   const [confirmQuit, setConfirmQuit] = useState(false);
   const [notice, setNotice] = useState('');
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   const [draft, setDraft] = useState<TaskDraft>({
     symbol: 'BTCUSDT',
@@ -281,6 +295,49 @@ function App() {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 3600);
   }
+
+  const checkForUpdate = useCallback(
+    async (manual = false) => {
+      setCheckingUpdate(true);
+      try {
+        const info = (await CheckForUpdates()) as UpdateInfo;
+        setUpdateInfo(info);
+        if (manual) {
+          if (info.hasUpdate) {
+            setNoticeWithTimeout(`发现新版本 ${info.latestVersion}，可立即下载更新。`);
+          } else {
+            setNoticeWithTimeout(`当前已是最新版本（${info.currentVersion}）。`);
+          }
+        } else if (info.hasUpdate) {
+          setNoticeWithTimeout(`检测到新版本 ${info.latestVersion}。`);
+        }
+      } catch (error) {
+        if (manual) {
+          setNoticeWithTimeout('检查更新失败，请稍后再试。');
+        }
+        console.error(error);
+      } finally {
+        setCheckingUpdate(false);
+      }
+    },
+    [],
+  );
+
+  async function openUpdatePage() {
+    if (!updateInfo?.releaseURL) {
+      setNoticeWithTimeout('没有可用的更新下载地址。');
+      return;
+    }
+    try {
+      await OpenURL(updateInfo.releaseURL);
+    } catch {
+      setNoticeWithTimeout('打开下载地址失败，请手动访问 GitHub Releases。');
+    }
+  }
+
+  useEffect(() => {
+    void checkForUpdate(false);
+  }, [checkForUpdate]);
 
   useEffect(() => {
     const hiddenHandler = () => {
@@ -620,6 +677,25 @@ function App() {
           </div>
         ) : null}
 
+        {updateInfo?.hasUpdate ? (
+          <div className="animate-reveal rounded-lg border border-danger/35 bg-danger/10 px-3 py-2 text-xs text-danger">
+            <div className="flex items-center justify-between gap-2">
+              <span>
+                有新版本：{updateInfo.latestVersion}（当前 {updateInfo.currentVersion}）
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  void openUpdatePage();
+                }}
+                className="rounded-md border border-danger/40 bg-white px-2 py-1 text-[11px] font-semibold text-danger"
+              >
+                下载更新
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <section className="space-y-3">
           {tasks.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-300 bg-panel p-8 text-center">
@@ -952,6 +1028,40 @@ function App() {
                         清空
                       </button>
                     </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-text">版本更新</p>
+                    <p className="mt-1 text-xs text-muted">
+                      当前版本：{updateInfo?.currentVersion || 'dev'}{' '}
+                      {updateInfo?.hasUpdate ? `· 最新：${updateInfo.latestVersion}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void checkForUpdate(true);
+                      }}
+                      className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-muted transition-colors hover:border-slate-300 hover:text-text"
+                    >
+                      {checkingUpdate ? '检查中...' : '检查更新'}
+                    </button>
+                    {updateInfo?.hasUpdate ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void openUpdatePage();
+                        }}
+                        className="rounded-lg border border-accent/35 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent"
+                      >
+                        下载更新
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
