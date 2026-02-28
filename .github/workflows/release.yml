@@ -43,6 +43,10 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Build frontend assets
+        working-directory: frontend
+        run: npm run build
+
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
 
@@ -50,8 +54,10 @@ jobs:
         shell: bash
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
+          mkdir -p frontend/dist
           wails build \
             -clean \
+            -skipfrontend \
             -platform ${{ matrix.wails_platform }} \
             -ldflags "-X main.Version=${{ github.ref_name }} -X main.Repo=${{ github.repository }}"
 

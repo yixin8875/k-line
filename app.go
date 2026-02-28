@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/getlantern/systray"
-	wailsMac "github.com/wailsapp/wails/v2/pkg/mac"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -381,7 +380,7 @@ func (a *App) NotifySystem(title string, subtitle string, message string) error 
 
 	switch goRuntime.GOOS {
 	case "darwin":
-		return wailsMac.ShowNotification(title, subtitle, message, "default")
+		return showMacNotification(title, subtitle, message)
 	default:
 		if ctx != nil {
 			wailsRuntime.LogInfof(ctx, "NotifySystem fallback [%s]: %s", title, message)
