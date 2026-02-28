@@ -59,20 +59,33 @@ jobs:
             -clean \
             -platform ${{ matrix.wails_platform }} \
             -ldflags "-X main.Version=${{ github.ref_name }} -X main.Repo=${{ github.repository }}"
+          ls -la build/bin
 
       - name: Package Windows artifact
         if: matrix.os == 'windows-latest'
-        shell: pwsh
+        shell: bash
         run: |
-          New-Item -ItemType Directory -Path dist -Force | Out-Null
-          Copy-Item "build/bin/k-line.exe" "dist/k-line-${{ github.ref_name }}-windows-amd64.exe"
+          mkdir -p dist
+          EXE_PATH="$(find build/bin -maxdepth 1 -type f -name '*.exe' | head -n 1)"
+          if [ -z "$EXE_PATH" ]; then
+            echo "No .exe found in build/bin"
+            ls -la build/bin
+            exit 1
+          fi
+          cp "$EXE_PATH" "dist/k-line-${{ github.ref_name }}-windows-amd64.exe"
 
       - name: Package macOS artifact
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
           mkdir -p dist
-          ditto -c -k --sequesterRsrc --keepParent "build/bin/k-line.app" "dist/k-line-${{ github.ref_name }}-macos-universal.zip"
+          APP_PATH="$(find build/bin -maxdepth 1 -type d -name '*.app' | head -n 1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found in build/bin"
+            ls -la build/bin
+            exit 1
+          fi
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "dist/k-line-${{ github.ref_name }}-macos-universal.zip"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
