@@ -57,7 +57,6 @@ jobs:
           mkdir -p frontend/dist
           wails build \
             -clean \
-            -skipfrontend \
             -platform ${{ matrix.wails_platform }} \
             -ldflags "-X main.Version=${{ github.ref_name }} -X main.Repo=${{ github.repository }}"
 
