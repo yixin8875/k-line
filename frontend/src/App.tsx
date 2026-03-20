@@ -65,6 +65,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   enableTelegram: false,
   telegramBotToken: '',
   telegramChatID: '',
+  enableFeishu: false,
+  feishuWebhookURL: '',
   enableWeCom: false,
   weComWebhookURL: '',
 };
@@ -89,6 +91,46 @@ type UpdateInfo = {
 };
 
 const VALID_SESSION_IDS = new Set<SessionTemplateId>(SESSION_TEMPLATES.map((item) => item.id));
+
+const SCENE_TEMPLATES: Array<{
+  id: string;
+  name: string;
+  description: string;
+  items: TaskTemplate['items'];
+}> = [
+  {
+    id: 'scene-intraday-crypto',
+    name: 'Intraday Crypto',
+    description: '1m/3m/5m/15m for active intraday tracking.',
+    items: [
+      { symbol: 'BTCUSDT', timeframeMinutes: 1, leadSeconds: 20, sessionTemplate: 'always' },
+      { symbol: 'BTCUSDT', timeframeMinutes: 3, leadSeconds: 30, sessionTemplate: 'always' },
+      { symbol: 'ETHUSDT', timeframeMinutes: 5, leadSeconds: 30, sessionTemplate: 'always' },
+      { symbol: 'BTCUSDT', timeframeMinutes: 15, leadSeconds: 45, sessionTemplate: 'always' },
+    ],
+  },
+  {
+    id: 'scene-swing-crypto',
+    name: 'Swing Crypto',
+    description: '30m/1h/4h/1D for trend-focused swing setups.',
+    items: [
+      { symbol: 'BTCUSDT', timeframeMinutes: 30, leadSeconds: 60, sessionTemplate: 'always' },
+      { symbol: 'ETHUSDT', timeframeMinutes: 60, leadSeconds: 90, sessionTemplate: 'always' },
+      { symbol: 'BTCUSDT', timeframeMinutes: 240, leadSeconds: 120, sessionTemplate: 'always' },
+      { symbol: 'BTCUSDT', timeframeMinutes: 1440, leadSeconds: 300, sessionTemplate: 'always' },
+    ],
+  },
+  {
+    id: 'scene-us-pre-open',
+    name: 'US Pre-Market',
+    description: 'Pre-market watchlist with US session timing.',
+    items: [
+      { symbol: 'SPY', timeframeMinutes: 5, leadSeconds: 20, sessionTemplate: 'us_stock' },
+      { symbol: 'QQQ', timeframeMinutes: 15, leadSeconds: 30, sessionTemplate: 'us_stock' },
+      { symbol: 'NVDA', timeframeMinutes: 60, leadSeconds: 45, sessionTemplate: 'us_stock' },
+    ],
+  },
+];
 
 function parseJSON<T>(key: string, fallback: T): T {
   try {
@@ -413,7 +455,7 @@ function App() {
   }, []);
 
   const pushExternal = useCallback(
-    async (provider: 'webhook' | 'telegram' | 'wecom', title: string, message: string): Promise<void> => {
+    async (provider: 'webhook' | 'telegram' | 'feishu' | 'wecom', title: string, message: string): Promise<void> => {
       if (provider === 'webhook') {
         if (!settings.enableWebhook || !settings.webhookURL.trim()) {
           return;
@@ -437,6 +479,14 @@ function App() {
         return;
       }
 
+      if (provider === 'feishu') {
+        if (!settings.enableFeishu || !settings.feishuWebhookURL.trim()) {
+          return;
+        }
+        await PushExternalNotification('feishu', settings.feishuWebhookURL.trim(), '', '', title, message);
+        return;
+      }
+
       if (!settings.enableWeCom || !settings.weComWebhookURL.trim()) {
         return;
       }
@@ -444,8 +494,10 @@ function App() {
     },
     [
       settings.enableTelegram,
+      settings.enableFeishu,
       settings.enableWeCom,
       settings.enableWebhook,
+      settings.feishuWebhookURL,
       settings.telegramBotToken,
       settings.telegramChatID,
       settings.weComWebhookURL,
@@ -504,10 +556,11 @@ function App() {
         await Promise.all([
           pushExternal('webhook', 'K线临近收盘', detail),
           pushExternal('telegram', 'K线临近收盘', detail),
+          pushExternal('feishu', 'K线临近收盘', detail),
           pushExternal('wecom', 'K线临近收盘', detail),
         ]);
       } catch {
-        setNoticeWithTimeout('外部推送失败，请检查 Webhook / Telegram / 企业微信配置。');
+        setNoticeWithTimeout('外部推送失败，请检查 Webhook / Telegram / Feishu / 企业微信配置。');
       }
     },
     [
@@ -665,9 +718,9 @@ function App() {
     setNoticeWithTimeout(`模板“${name}”已保存。`);
   }
 
-  function applyTemplate(template: TaskTemplate) {
+  function buildTasksFromTemplateItems(items: TaskTemplate['items']): ReminderTask[] {
     const createdAt = Date.now();
-    const generated = template.items.map((item, index): ReminderTask => {
+    return items.map((item, index): ReminderTask => {
       const nowTs = Date.now() + index;
       return {
         id: `${createdAt}-${index}-${Math.random().toString(36).slice(2, 8)}`,
@@ -680,10 +733,26 @@ function App() {
         lastAlertCycle: 0,
       };
     });
+  }
+
+  function applyTemplate(template: TaskTemplate) {
+    const generated = buildTasksFromTemplateItems(template.items);
 
     setTasks((prev) => [...generated, ...prev]);
     setShowTemplateModal(false);
     setNoticeWithTimeout(`已应用模板“${template.name}”（新增 ${generated.length} 个任务）。`);
+  }
+
+  function applySceneTemplate(sceneId: string) {
+    const scene = SCENE_TEMPLATES.find((item) => item.id === sceneId);
+    if (!scene) {
+      return;
+    }
+
+    const generated = buildTasksFromTemplateItems(scene.items);
+    setTasks((prev) => [...generated, ...prev]);
+    setShowTemplateModal(false);
+    setNoticeWithTimeout(`已应用场景模板“${scene.name}”（新增 ${generated.length} 个任务）。`);
   }
 
   function removeTemplate(id: string) {
@@ -695,6 +764,7 @@ function App() {
       await Promise.all([
         pushExternal('webhook', 'K线测试通知', '这是 Webhook 测试消息。'),
         pushExternal('telegram', 'K线测试通知', '这是 Telegram 测试消息。'),
+        pushExternal('feishu', 'K线测试通知', '这是 Feishu 测试消息。'),
         pushExternal('wecom', 'K线测试通知', '这是企业微信机器人测试消息。'),
       ]);
       setNoticeWithTimeout('外部通道测试已发送。');
@@ -740,6 +810,15 @@ function App() {
                 title="设置"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5"><path fill="currentColor" d="M12 8a4 4 0 1 0 .001 8.001A4 4 0 0 0 12 8Zm8.94 4a7.8 7.8 0 0 0-.2-1.7l2.1-1.6-2-3.4-2.6 1a7.9 7.9 0 0 0-1.5-1l-.4-2.7h-3.9l-.4 2.7a7.9 7.9 0 0 0-1.5 1l-2.6-1-2 3.4 2.1 1.6a7.8 7.8 0 0 0-.2 1.7c0 .6.1 1.1.2 1.7l-2.1 1.6 2 3.4 2.6-1c.5-.4 1-.7 1.5-1l.4 2.7h3.9l.4-2.7c.5-.3 1-.6 1.5-1l2.6 1 2-3.4-2.1-1.6c.1-.6.2-1.1.2-1.7Z"/></svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowTemplateModal(true)}
+                className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-muted transition-colors hover:text-text"
+                aria-label="模板"
+                title="模板"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5"><path fill="currentColor" d="M4 5a2 2 0 0 1 2-2h7l7 7v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5Zm9 0v5h5"/></svg>
               </button>
               <button
                 type="button"
@@ -930,6 +1009,31 @@ function App() {
           <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-panel p-5">
             <h3 className="text-xl font-semibold text-text">任务模板</h3>
             <p className="mt-1 text-sm text-muted">可将当前任务组保存为模板，并一键重复加载。</p>
+
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
+              <p className="text-sm font-semibold text-text">场景模板（快速开始）</p>
+              <div className="mt-2 space-y-2">
+                {SCENE_TEMPLATES.map((scene) => (
+                  <div key={scene.id} className="rounded-lg border border-slate-200 bg-panel p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-text">{scene.name}</p>
+                        <p className="mt-1 text-xs text-muted">
+                          {scene.description} · {scene.items.length} 个任务
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => applySceneTemplate(scene.id)}
+                        className="rounded-lg border border-accent/35 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent"
+                      >
+                        一键应用
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
             <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3">
               <p className="text-sm text-text">保存当前任务为模板</p>
@@ -1220,7 +1324,7 @@ function App() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-semibold text-text">外部通知通道</p>
-                    <p className="mt-1 text-xs text-muted">支持 Webhook / Telegram / 企业微信机器人。</p>
+                    <p className="mt-1 text-xs text-muted">支持 Webhook / Telegram / Feishu / 企业微信机器人。</p>
                   </div>
                   <button
                     type="button"
@@ -1273,6 +1377,22 @@ function App() {
                       className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-text outline-none focus:border-accent/60"
                     />
                   </div>
+
+                  <label className="mt-1 flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                    <span className="text-sm text-text">Feishu 机器人</span>
+                    <input
+                      type="checkbox"
+                      checked={settings.enableFeishu}
+                      onChange={(e) => patchSettings({ enableFeishu: e.target.checked })}
+                      className="h-4 w-4 accent-[rgb(var(--accent-rgb))]"
+                    />
+                  </label>
+                  <input
+                    value={settings.feishuWebhookURL}
+                    onChange={(e) => patchSettings({ feishuWebhookURL: e.target.value })}
+                    placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-text outline-none focus:border-accent/60"
+                  />
 
                   <label className="mt-1 flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
                     <span className="text-sm text-text">企业微信机器人</span>

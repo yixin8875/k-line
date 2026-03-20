@@ -29,6 +29,8 @@ export interface AppSettings {
   enableTelegram: boolean;
   telegramBotToken: string;
   telegramChatID: string;
+  enableFeishu: boolean;
+  feishuWebhookURL: string;
   enableWeCom: boolean;
   weComWebhookURL: string;
 }

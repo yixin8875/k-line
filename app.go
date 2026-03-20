@@ -444,6 +444,20 @@ func (a *App) PushExternalNotification(provider string, endpoint string, token s
 		if err != nil {
 			return err
 		}
+	case "feishu":
+		if strings.TrimSpace(endpoint) == "" {
+			return errors.New("feishu webhook url is required")
+		}
+		url = strings.TrimSpace(endpoint)
+		body, err = json.Marshal(map[string]any{
+			"msg_type": "text",
+			"content": map[string]string{
+				"text": title + "\n" + message,
+			},
+		})
+		if err != nil {
+			return err
+		}
 	case "wecom":
 		if strings.TrimSpace(endpoint) == "" {
 			return errors.New("wecom webhook url is required")
@@ -485,6 +499,21 @@ func (a *App) PushExternalNotification(provider string, endpoint string, token s
 			}
 			if len(responseBody) > 0 && json.Unmarshal(responseBody, &payload) == nil && !payload.OK {
 				return fmt.Errorf("telegram push failed: %s", strings.TrimSpace(payload.Description))
+			}
+		case "feishu":
+			var payload struct {
+				StatusCode    *int   `json:"StatusCode"`
+				Code          *int   `json:"code"`
+				StatusMessage string `json:"StatusMessage"`
+				Msg           string `json:"msg"`
+			}
+			if len(responseBody) > 0 && json.Unmarshal(responseBody, &payload) == nil {
+				if payload.StatusCode != nil && *payload.StatusCode != 0 {
+					return fmt.Errorf("feishu push failed: %d %s", *payload.StatusCode, strings.TrimSpace(payload.StatusMessage))
+				}
+				if payload.Code != nil && *payload.Code != 0 {
+					return fmt.Errorf("feishu push failed: %d %s", *payload.Code, strings.TrimSpace(payload.Msg))
+				}
 			}
 		case "wecom":
 			var payload struct {
