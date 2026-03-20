@@ -40,8 +40,7 @@ const STORAGE_KEYS = {
   templates: 'kline.templates.v1',
 };
 
-const PRESET_MINUTES = [15, 60, 240, 1440];
-const ALERT_MISS_GRACE_MS = 2000;
+const PRESET_MINUTES = [1, 3, 5, 15, 30, 60, 240, 1440];
 
 const ACCENT_RGB: Record<AccentColor, string> = {
   blue: '59 130 246',
@@ -55,6 +54,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   themeMode: 'light',
   accent: 'blue',
   globalLeadSeconds: 30,
+  alertsEnabled: true,
   enableTTS: false,
   enableDefaultBeep: true,
   enableSystemNotification: true,
@@ -181,24 +181,30 @@ function TaskCard(props: {
           <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs font-semibold text-muted">
             {formatTimeframe(task.timeframeMinutes)}
           </span>
-          <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-muted">
-            {formatSessionTemplate(task.sessionTemplate)}
-          </span>
         </div>
         <button
           type="button"
           onClick={() => onDelete(task.id)}
-          className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-muted transition-colors hover:border-danger/60 hover:text-danger"
+          className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-muted transition-colors hover:border-danger/60 hover:text-danger"
           aria-label="删除任务"
           title="删除任务"
         >
-          删除
+          <svg viewBox="0 0 24 24" className="h-4 w-4"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 6h2v9h-2V9Zm4 0h2v9h-2V9Zm-8 0h2v9H6V9Z"/></svg>
         </button>
       </header>
 
       <div className="mb-2 flex items-end justify-between gap-3">
         <p className="font-mono text-3xl font-bold tracking-tight text-text">{formatCountdown(remaining)}</p>
-        <p className="text-xs text-muted">收盘 {formatClock(task.nextCloseAt)}</p>
+        <div className="text-xs text-muted">
+          <p className="flex items-center gap-1">
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5"><path fill="currentColor" d="M12 8a4 4 0 0 1 4 4v3l1.5 1.5a1 1 0 0 1-.7 1.7H7.2a1 1 0 0 1-.7-1.7L8 15v-3a4 4 0 0 1 4-4Z"/></svg>
+            {formatClock(task.nextCloseAt)}
+          </p>
+          <p className="mt-1 flex items-center gap-1">
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5"><path fill="currentColor" d="M12 2a1 1 0 0 1 1 1v1.06a7 7 0 0 1 5 6.94v3l2 2H4l2-2v-3a7 7 0 0 1 5-6.94V3a1 1 0 0 1 1-1Zm0 20a2.5 2.5 0 0 0 2.3-1.5H9.7A2.5 2.5 0 0 0 12 22Z"/></svg>
+            {-task.leadSeconds}s
+          </p>
+        </div>
       </div>
 
       <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
@@ -211,7 +217,7 @@ function TaskCard(props: {
       {!sessionOpen ? (
         <p className="mt-2 text-xs font-semibold text-muted">当前时段休市，提醒暂停。</p>
       ) : urgent ? (
-        <p className="mt-2 text-xs font-semibold text-danger">预警已触发 · 剩余 {task.leadSeconds}s 窗口</p>
+        <p className="mt-2 text-xs font-semibold text-danger">预警窗口中 · 剩余 {task.leadSeconds}s</p>
       ) : (
         <p className="mt-2 text-xs text-muted">提前提醒: {task.leadSeconds}s</p>
       )}
@@ -296,6 +302,58 @@ function App() {
   function setNoticeWithTimeout(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(''), 3600);
+  }
+
+  function formatTimeframeSpeech(minutes: number): string {
+    if (minutes % 1440 === 0) {
+      const d = minutes / 1440;
+      return d === 1 ? '日线' : `${d}天`;
+    }
+    if (minutes % 60 === 0) {
+      const h = minutes / 60;
+      return `${h}小时`;
+    }
+    return `${minutes}分钟`;
+  }
+
+  function formatSymbolSpeech(symbol: string): string {
+    const MAP: Record<string, string> = {
+      BTC: '比特币',
+      ETH: '以太坊',
+      BNB: '币安币',
+      SOL: '索拉纳',
+      USDT: '泰达币',
+      USDC: '美元稳定币',
+      USD: '美元',
+      CNY: '人民币',
+      EUR: '欧元',
+      JPY: '日元',
+      XAU: '黄金',
+      GOLD: '黄金',
+      XAG: '白银',
+      SILVER: '白银',
+    };
+    const sanitize = (t: string) => t.replace(/[-.\s]+/g, '/').toUpperCase();
+    const speakToken = (t: string) => MAP[t] || t;
+    const s = sanitize(String(symbol).trim());
+    if (/[\u4e00-\u9fa5]/.test(symbol)) {
+      return symbol.trim();
+    }
+    if (s.includes('/')) {
+      const parts = s.split('/').filter(Boolean);
+      if (parts.length === 2) {
+        return `${speakToken(parts[0])} 对 ${speakToken(parts[1])}`;
+      }
+      return parts.map(speakToken).join(' 对 ');
+    }
+    const SUF = ['USDT', 'USDC', 'USD', 'CNY', 'EUR', 'JPY', 'BTC', 'ETH', 'BNB', 'XAU', 'XAG'];
+    for (const suf of SUF) {
+      if (s.endsWith(suf) && s.length > suf.length) {
+        const base = s.slice(0, s.length - suf.length);
+        return `${speakToken(base)} 对 ${speakToken(suf)}`;
+      }
+    }
+    return speakToken(s);
   }
 
   const checkForUpdate = useCallback(
@@ -398,20 +456,32 @@ function App() {
   const triggerAlert = useCallback(
     async (task: ReminderTask) => {
       const tfText = formatTimeframe(task.timeframeMinutes);
+      const tfSpeech = formatTimeframeSpeech(task.timeframeMinutes);
       const sessionText = formatSessionTemplate(task.sessionTemplate);
       const detail = `${task.symbol} ${tfText}（${sessionText}）将在 ${task.leadSeconds} 秒后收盘`;
-      const hasConfiguredSound = settings.enableDefaultBeep || Boolean(settings.customSoundDataUrl);
+      const anySoundEnabled =
+        settings.enableDefaultBeep || Boolean(settings.customSoundDataUrl) || settings.enableTTS;
       let playedInFrontend = false;
+
+      if (!anySoundEnabled) {
+        setNoticeWithTimeout('提醒已触发，但声音提醒已关闭。请在设置中开启默认蜂鸣或上传自定义声音。');
+      }
 
       if (settings.enableDefaultBeep) {
         const played = await playDefaultBeep();
         playedInFrontend = playedInFrontend || played;
+        try {
+          // Native beep is more reliable than WebAudio under background/minimized state.
+          await PlayAlertSound();
+        } catch {
+          // Keep silent here, other channels continue.
+        }
       }
       if (settings.customSoundDataUrl) {
         const played = await playCustomSound(settings.customSoundDataUrl);
         playedInFrontend = playedInFrontend || played;
       }
-      if (hasConfiguredSound && (document.hidden || !playedInFrontend)) {
+      if (settings.customSoundDataUrl && (document.hidden || !playedInFrontend)) {
         try {
           await PlayAlertSound();
         } catch {
@@ -419,7 +489,7 @@ function App() {
         }
       }
       if (settings.enableTTS) {
-        speakAlert(`注意，${task.symbol} ${tfText} 即将收盘`);
+        speakAlert(`注意，${formatSymbolSpeech(task.symbol)} ${tfSpeech} 即将收盘`);
       }
 
       if (settings.enableSystemNotification) {
@@ -450,46 +520,50 @@ function App() {
   );
 
   useEffect(() => {
+    if (tasks.length === 0) {
+      return;
+    }
+
     const dueAlerts: ReminderTask[] = [];
+    let changed = false;
+    const updated = tasks.map((task) => {
+      const cycleCloseAt = task.nextCloseAt;
+      const nextCloseAt = normalizeNextClose(now, cycleCloseAt, task.timeframeMinutes);
+      const cycleMs = Math.max(1, task.timeframeMinutes) * 60 * 1000;
+      let lastAlertCycle = task.lastAlertCycle;
+      const leadAt = cycleCloseAt - task.leadSeconds * 1000;
+      const latestAllowedAlertAt = cycleCloseAt + cycleMs - 1000;
+      const sessionCheckAt = now < cycleCloseAt ? now : cycleCloseAt - 1;
+      const sessionOpen = isSessionOpen(task.sessionTemplate, sessionCheckAt);
 
-    setTasks((prev) => {
-      let changed = false;
-      const updated = prev.map((task) => {
-        const cycleCloseAt = task.nextCloseAt;
-        const nextCloseAt = normalizeNextClose(now, cycleCloseAt, task.timeframeMinutes);
-        let lastAlertCycle = task.lastAlertCycle;
-        const leadAt = cycleCloseAt - task.leadSeconds * 1000;
-        const latestAllowedAlertAt = cycleCloseAt + ALERT_MISS_GRACE_MS;
-        const sessionCheckAt = now < cycleCloseAt ? now : cycleCloseAt - 1;
-        const sessionOpen = isSessionOpen(task.sessionTemplate, sessionCheckAt);
+      if (
+        sessionOpen &&
+        now >= leadAt &&
+        now <= latestAllowedAlertAt &&
+        lastAlertCycle !== cycleCloseAt
+      ) {
+        dueAlerts.push({ ...task, nextCloseAt: cycleCloseAt });
+        lastAlertCycle = cycleCloseAt;
+      }
 
-        if (
-          sessionOpen &&
-          now >= leadAt &&
-          now <= latestAllowedAlertAt &&
-          lastAlertCycle !== cycleCloseAt
-        ) {
-          dueAlerts.push({ ...task, nextCloseAt: cycleCloseAt });
-          lastAlertCycle = cycleCloseAt;
-        }
+      if (nextCloseAt !== task.nextCloseAt || lastAlertCycle !== task.lastAlertCycle) {
+        changed = true;
+        return { ...task, nextCloseAt, lastAlertCycle };
+      }
 
-        if (nextCloseAt !== task.nextCloseAt || lastAlertCycle !== task.lastAlertCycle) {
-          changed = true;
-          return { ...task, nextCloseAt, lastAlertCycle };
-        }
-
-        return task;
-      });
-
-      return changed ? updated : prev;
+      return task;
     });
+
+    if (changed) {
+      setTasks(updated);
+    }
 
     if (dueAlerts.length > 0) {
       dueAlerts.forEach((task) => {
         void triggerAlert(task);
       });
     }
-  }, [now, triggerAlert]);
+  }, [now, tasks, triggerAlert]);
 
   function createTask() {
     const timeframe = draft.useCustom ? Number.parseInt(draft.customMinutes, 10) : draft.preset;
@@ -632,24 +706,51 @@ function App() {
   return (
     <div className="min-h-screen px-3 py-3 text-text">
       <div className="mx-auto flex max-w-[560px] flex-col gap-3">
-        <header className="rounded-xl border border-slate-200 bg-panel p-4">
-          <div className="flex items-start justify-between gap-3">
+        <div className="rounded-xl border border-slate-200 bg-panel p-3">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-text">K 线收盘提醒</h1>
-              <p className="mt-1 text-xs text-muted">时钟对齐 · 后台运行 · 多周期并行</p>
+              <h1 className="text-base font-semibold text-text">K 线收盘提醒</h1>
+              <p className="text-[11px] text-muted">时钟对齐 · 后台运行</p>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                void applyAlwaysOnTop();
-              }}
-              className={[
-                'rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors',
-                alwaysOnTop ? 'border-accent/50 bg-accent/15 text-accent' : 'border-slate-200 text-muted',
-              ].join(' ')}
-            >
-              {alwaysOnTop ? '已置顶' : '置顶'}
-            </button>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void applyAlwaysOnTop();
+                }}
+                className={[
+                  'relative h-9 w-14 rounded-full border transition-colors',
+                  alwaysOnTop ? 'border-accent/60 bg-accent/15' : 'border-slate-300 bg-white',
+                ].join(' ')}
+                aria-label="置顶开关"
+                title="置顶开关"
+              >
+                <span
+                  className={[
+                    'absolute left-1 top-1 h-7 w-7 rounded-full bg-white shadow transition-transform',
+                    alwaysOnTop ? 'translate-x-6' : 'translate-x-0',
+                  ].join(' ')}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(true)}
+                className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-muted transition-colors hover:text-text"
+                aria-label="设置"
+                title="设置"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5"><path fill="currentColor" d="M12 8a4 4 0 1 0 .001 8.001A4 4 0 0 0 12 8Zm8.94 4a7.8 7.8 0 0 0-.2-1.7l2.1-1.6-2-3.4-2.6 1a7.9 7.9 0 0 0-1.5-1l-.4-2.7h-3.9l-.4 2.7a7.9 7.9 0 0 0-1.5 1l-2.6-1-2 3.4 2.1 1.6a7.8 7.8 0 0 0-.2 1.7c0 .6.1 1.1.2 1.7l-2.1 1.6 2 3.4 2.6-1c.5-.4 1-.7 1.5-1l.4 2.7h3.9l.4-2.7c.5-.3 1-.6 1.5-1l2.6 1 2-3.4-2.1-1.6c.1-.6.2-1.1.2-1.7Z"/></svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(true)}
+                className="grid h-9 w-9 place-items-center rounded-xl bg-accent text-white transition-colors hover:bg-accent/90"
+                aria-label="添加"
+                title="添加"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5"><path fill="currentColor" d="M11 11V5h2v6h6v2h-6v6h-2v-6H5v-2h6Z"/></svg>
+              </button>
+            </div>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
             <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
@@ -661,36 +762,7 @@ function App() {
               <p className="mt-1 text-sm font-semibold text-text">{tasks.length} 个</p>
             </div>
           </div>
-        </header>
-
-        <section className="rounded-xl border border-slate-200 bg-panel p-2">
-          <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
-            <button type="button" onClick={() => setShowAddModal(true)} className="rounded-lg bg-accent px-3 py-2 text-white">
-              新建提醒
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowTemplateModal(true)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-muted"
-            >
-              模板
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowSettingsModal(true)}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-muted"
-            >
-              设置
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirmQuit(true)}
-              className="rounded-lg border border-danger/35 bg-danger/10 px-3 py-2 text-danger"
-            >
-              退出
-            </button>
-          </div>
-        </section>
+        </div>
 
         {notice ? (
           <div className="animate-reveal rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-xs text-text">
@@ -720,8 +792,8 @@ function App() {
         <section className="space-y-3">
           {tasks.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-300 bg-panel p-8 text-center">
-              <h2 className="text-base font-semibold text-text">暂无提醒任务</h2>
-              <p className="mt-2 text-xs text-muted">点击上方“新建提醒”，添加 15m / 1h / 4h / 日线提醒。</p>
+              <h2 className="text-base font-semibold text-text">暂无活跃提醒</h2>
+              <p className="mt-2 text-xs text-muted">点击右上角 + 添加一个</p>
             </div>
           ) : (
             tasks.map((task) => (
@@ -741,22 +813,22 @@ function App() {
       {showAddModal ? (
         <div className="fixed inset-0 z-40 grid place-items-center bg-slate-900/20 p-4">
           <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-panel p-5">
-            <h3 className="text-xl font-semibold text-text">新建 K 线提醒</h3>
+            <h3 className="text-xl font-semibold text-text">添加提醒</h3>
             <p className="mt-1 text-sm text-muted">系统会自动对齐到下一个标准收盘点，而不是“当前时间 + 周期”。</p>
 
             <div className="mt-4 grid gap-4">
               <label className="grid gap-2 text-sm">
-                <span className="text-muted">交易对 / 标的</span>
+                <span className="text-muted">标签 / 名称</span>
                 <input
                   value={draft.symbol}
                   onChange={(e) => setDraft((prev) => ({ ...prev, symbol: e.target.value }))}
-                  placeholder="例如 BTCUSDT"
+                  placeholder="例如 BTC/USDT"
                   className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-text outline-none transition-colors focus:border-accent/60"
                 />
               </label>
 
               <div className="grid gap-2 text-sm">
-                <span className="text-muted">K 线周期（分钟）</span>
+                <span className="text-muted">K线周期</span>
                 <div className="flex flex-wrap gap-2">
                   {PRESET_MINUTES.map((minute) => (
                     <button
@@ -770,7 +842,7 @@ function App() {
                           : 'border-slate-200 text-muted hover:border-slate-300 hover:text-text',
                       ].join(' ')}
                     >
-                      {formatTimeframe(minute)}
+                      {minute === 1440 ? '日线' : minute % 60 === 0 ? `${minute / 60}小时` : `${minute}分钟`}
                     </button>
                   ))}
                   <button
@@ -792,7 +864,7 @@ function App() {
                     min={1}
                     value={draft.customMinutes}
                     onChange={(e) => setDraft((prev) => ({ ...prev, customMinutes: e.target.value }))}
-                    placeholder="输入分钟数，例如 45"
+                    placeholder="输入周期（分）..."
                     className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-text outline-none transition-colors focus:border-accent/60"
                   />
                 ) : null}
@@ -821,7 +893,7 @@ function App() {
               </div>
 
               <label className="grid gap-2 text-sm">
-                <span className="text-muted">提前提醒秒数（留空使用全局默认）</span>
+                <span className="text-muted">提前提醒（秒）</span>
                 <input
                   type="number"
                   min={1}
@@ -846,7 +918,7 @@ function App() {
                 onClick={createTask}
                 className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white"
               >
-                创建任务
+                添加任务
               </button>
             </div>
           </div>
@@ -982,6 +1054,17 @@ function App() {
                       className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-text outline-none transition-colors focus:border-accent/60"
                     />
                   </label>
+                  <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <span className="text-sm text-text">窗口置顶</span>
+                    <input
+                      type="checkbox"
+                      checked={alwaysOnTop}
+                      onChange={() => {
+                        void applyAlwaysOnTop();
+                      }}
+                      className="h-4 w-4 accent-[rgb(var(--accent-rgb))]"
+                    />
+                  </label>
                 </div>
 
                 <div className="grid gap-3">
@@ -1034,13 +1117,39 @@ function App() {
                         type="button"
                         onClick={() => {
                           void (async () => {
-                            const played = await playDefaultBeep();
-                            if (!played) {
+                            if (!settings.enableDefaultBeep && !settings.customSoundDataUrl) {
+                              setNoticeWithTimeout('请先开启默认蜂鸣，或上传自定义声音。');
+                              return;
+                            }
+
+                            let ok = false;
+
+                            if (settings.enableDefaultBeep) {
+                              const played = await playDefaultBeep();
+                              ok = ok || played;
                               try {
                                 await PlayAlertSound();
+                                ok = true;
                               } catch {
-                                setNoticeWithTimeout('默认蜂鸣测试失败，请检查系统声音设置。');
+                                // ignore
                               }
+                            }
+
+                            if (settings.customSoundDataUrl) {
+                              const played = await playCustomSound(settings.customSoundDataUrl);
+                              ok = ok || played;
+                              if (!played) {
+                                try {
+                                  await PlayAlertSound();
+                                  ok = true;
+                                } catch {
+                                  // ignore
+                                }
+                              }
+                            }
+
+                            if (!ok) {
+                              setNoticeWithTimeout('声音测试失败，请检查系统输出设备与音量。');
                             }
                           })();
                         }}

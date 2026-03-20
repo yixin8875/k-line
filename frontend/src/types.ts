@@ -18,6 +18,7 @@ export interface AppSettings {
   themeMode: ThemeMode;
   accent: AccentColor;
   globalLeadSeconds: number;
+  alertsEnabled: boolean;
   enableTTS: boolean;
   enableDefaultBeep: boolean;
   enableSystemNotification: boolean;
