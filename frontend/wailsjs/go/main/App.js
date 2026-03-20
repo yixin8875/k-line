@@ -14,6 +14,10 @@ export function OpenURL(arg1) {
   return window['go']['main']['App']['OpenURL'](arg1);
 }
 
+export function PlayAlertSound() {
+  return window['go']['main']['App']['PlayAlertSound']();
+}
+
 export function PushExternalNotification(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['PushExternalNotification'](arg1, arg2, arg3, arg4, arg5, arg6);
 }

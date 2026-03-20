@@ -1,6 +1,8 @@
 module kline-desktop
 
-go 1.22
+go 1.22.0
+
+toolchain go1.22.6
 
 require (
 	github.com/getlantern/systray v1.2.2

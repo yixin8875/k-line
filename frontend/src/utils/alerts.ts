@@ -1,15 +1,61 @@
 let audioContext: AudioContext | null = null;
+let unlockListenersInstalled = false;
 
-function getAudioContext(): AudioContext {
+function getAudioContext(): AudioContext | null {
+  if (typeof window === 'undefined' || typeof AudioContext === 'undefined') {
+    return null;
+  }
   if (!audioContext) {
     audioContext = new AudioContext();
   }
   return audioContext;
 }
 
-export function playDefaultBeep(): void {
-  const context = getAudioContext();
-  const start = context.currentTime;
+function installAudioUnlockListeners(): void {
+  if (unlockListenersInstalled || typeof window === 'undefined') {
+    return;
+  }
+
+  unlockListenersInstalled = true;
+  const events: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart'];
+
+  const cleanup = () => {
+    events.forEach((eventName) => {
+      window.removeEventListener(eventName, onUserGesture);
+    });
+  };
+
+  const onUserGesture = () => {
+    const context = getAudioContext();
+    if (!context) {
+      cleanup();
+      return;
+    }
+
+    if (context.state === 'running') {
+      cleanup();
+      return;
+    }
+
+    void context
+      .resume()
+      .then(() => {
+        if (context.state === 'running') {
+          cleanup();
+        }
+      })
+      .catch(() => {
+        // Keep listeners so the next user gesture can try again.
+      });
+  };
+
+  events.forEach((eventName) => {
+    window.addEventListener(eventName, onUserGesture, { passive: true });
+  });
+}
+
+function scheduleBeep(context: AudioContext): void {
+  const start = context.currentTime + 0.01;
 
   [0, 0.22, 0.44].forEach((offset) => {
     const oscillator = context.createOscillator();
@@ -30,13 +76,44 @@ export function playDefaultBeep(): void {
   });
 }
 
-export function playCustomSound(dataUrl: string): void {
-  if (!dataUrl) {
-    return;
+export async function playDefaultBeep(): Promise<boolean> {
+  installAudioUnlockListeners();
+  const context = getAudioContext();
+  if (!context) {
+    return false;
   }
+
+  if (context.state === 'running') {
+    scheduleBeep(context);
+    return true;
+  }
+
+  try {
+    await context.resume();
+    scheduleBeep(context);
+    return true;
+  } catch {
+    // Audio is still locked by runtime policy.
+  }
+
+  return false;
+}
+
+export async function playCustomSound(dataUrl: string): Promise<boolean> {
+  if (!dataUrl) {
+    return false;
+  }
+
+  installAudioUnlockListeners();
   const audio = new Audio(dataUrl);
   audio.volume = 1;
-  void audio.play();
+  try {
+    await audio.play();
+    return true;
+  } catch {
+    // Ignore autoplay blocking, user can unlock audio by interacting with the UI.
+    return false;
+  }
 }
 
 export function speakAlert(text: string): void {
@@ -64,3 +141,5 @@ export async function notifyBrowser(title: string, body: string): Promise<void> 
     new Notification(title, { body });
   }
 }
+
+installAudioUnlockListeners();

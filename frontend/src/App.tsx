@@ -4,6 +4,7 @@ import {
   CheckForUpdates,
   NotifySystem,
   OpenURL,
+  PlayAlertSound,
   PushExternalNotification,
   RequestQuit,
   SetAlwaysOnTop,
@@ -40,6 +41,7 @@ const STORAGE_KEYS = {
 };
 
 const PRESET_MINUTES = [15, 60, 240, 1440];
+const ALERT_MISS_GRACE_MS = 2000;
 
 const ACCENT_RGB: Record<AccentColor, string> = {
   blue: '59 130 246',
@@ -398,12 +400,23 @@ function App() {
       const tfText = formatTimeframe(task.timeframeMinutes);
       const sessionText = formatSessionTemplate(task.sessionTemplate);
       const detail = `${task.symbol} ${tfText}（${sessionText}）将在 ${task.leadSeconds} 秒后收盘`;
+      const hasConfiguredSound = settings.enableDefaultBeep || Boolean(settings.customSoundDataUrl);
+      let playedInFrontend = false;
 
       if (settings.enableDefaultBeep) {
-        playDefaultBeep();
+        const played = await playDefaultBeep();
+        playedInFrontend = playedInFrontend || played;
       }
       if (settings.customSoundDataUrl) {
-        playCustomSound(settings.customSoundDataUrl);
+        const played = await playCustomSound(settings.customSoundDataUrl);
+        playedInFrontend = playedInFrontend || played;
+      }
+      if (hasConfiguredSound && (document.hidden || !playedInFrontend)) {
+        try {
+          await PlayAlertSound();
+        } catch {
+          // Keep silent here, other channels continue.
+        }
       }
       if (settings.enableTTS) {
         speakAlert(`注意，${task.symbol} ${tfText} 即将收盘`);
@@ -442,14 +455,22 @@ function App() {
     setTasks((prev) => {
       let changed = false;
       const updated = prev.map((task) => {
-        const nextCloseAt = normalizeNextClose(now, task.nextCloseAt, task.timeframeMinutes);
+        const cycleCloseAt = task.nextCloseAt;
+        const nextCloseAt = normalizeNextClose(now, cycleCloseAt, task.timeframeMinutes);
         let lastAlertCycle = task.lastAlertCycle;
-        const leadAt = nextCloseAt - task.leadSeconds * 1000;
-        const sessionOpen = isSessionOpen(task.sessionTemplate, now);
+        const leadAt = cycleCloseAt - task.leadSeconds * 1000;
+        const latestAllowedAlertAt = cycleCloseAt + ALERT_MISS_GRACE_MS;
+        const sessionCheckAt = now < cycleCloseAt ? now : cycleCloseAt - 1;
+        const sessionOpen = isSessionOpen(task.sessionTemplate, sessionCheckAt);
 
-        if (sessionOpen && now >= leadAt && now < nextCloseAt && lastAlertCycle !== nextCloseAt) {
-          dueAlerts.push({ ...task, nextCloseAt });
-          lastAlertCycle = nextCloseAt;
+        if (
+          sessionOpen &&
+          now >= leadAt &&
+          now <= latestAllowedAlertAt &&
+          lastAlertCycle !== cycleCloseAt
+        ) {
+          dueAlerts.push({ ...task, nextCloseAt: cycleCloseAt });
+          lastAlertCycle = cycleCloseAt;
         }
 
         if (nextCloseAt !== task.nextCloseAt || lastAlertCycle !== task.lastAlertCycle) {
@@ -1012,9 +1033,29 @@ function App() {
                       <button
                         type="button"
                         onClick={() => {
-                          if (settings.customSoundDataUrl) {
-                            playCustomSound(settings.customSoundDataUrl);
+                          void (async () => {
+                            const played = await playDefaultBeep();
+                            if (!played) {
+                              try {
+                                await PlayAlertSound();
+                              } catch {
+                                setNoticeWithTimeout('默认蜂鸣测试失败，请检查系统声音设置。');
+                              }
+                            }
+                          })();
+                        }}
+                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-muted transition-colors hover:border-slate-300 hover:text-text"
+                      >
+                        测试蜂鸣
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!settings.customSoundDataUrl) {
+                            setNoticeWithTimeout('请先上传自定义声音。');
+                            return;
                           }
+                          void playCustomSound(settings.customSoundDataUrl);
                         }}
                         className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-muted transition-colors hover:border-slate-300 hover:text-text"
                       >

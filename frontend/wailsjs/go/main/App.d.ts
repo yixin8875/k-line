@@ -7,6 +7,8 @@ export function NotifySystem(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function OpenURL(arg1:string):Promise<void>;
 
+export function PlayAlertSound():Promise<void>;
+
 export function PushExternalNotification(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<void>;
 
 export function RequestQuit():Promise<void>;

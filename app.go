@@ -389,6 +389,19 @@ func (a *App) NotifySystem(title string, subtitle string, message string) error 
 	}
 }
 
+// PlayAlertSound plays a native OS alert sound as a fallback when WebAudio cannot play.
+func (a *App) PlayAlertSound() error {
+	a.mu.Lock()
+	ctx := a.ctx
+	a.mu.Unlock()
+
+	err := playNativeAlertSound()
+	if err != nil && ctx != nil {
+		wailsRuntime.LogErrorf(ctx, "PlayAlertSound failed: %v", err)
+	}
+	return err
+}
+
 // PushExternalNotification sends alert messages to webhook/Telegram/WeCom channels.
 func (a *App) PushExternalNotification(provider string, endpoint string, token string, chatID string, title string, message string) error {
 	if strings.TrimSpace(message) == "" {
